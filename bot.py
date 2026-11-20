@@ -5,6 +5,7 @@ import aiohttp, aiomysql, feedparser
 from dotenv import load_dotenv
 from pyrogram import Client, filters, idle
 from pyrogram.enums import ParseMode
+from upload_announcements import register as register_upload_announcements, initialize as initialize_upload_announcements
 from official_discovery import discover
 from official_newsroom import discover_jiostar
 from official_article_dates import verify_jiostar_article
@@ -29,6 +30,7 @@ ENABLE_JIOSTAR_NEWSROOM = os.getenv("ENABLE_JIOSTAR_NEWSROOM", "false").lower() 
 VERIFY_OFFICIAL_PAGE = os.getenv("VERIFY_OFFICIAL_PAGE", "true").lower() == "true"
 AUTO_PUBLISH_JIOSTAR = os.getenv("AUTO_PUBLISH_JIOSTAR", "false").lower() == "true"
 RECHECK_PENDING = os.getenv("RECHECK_PENDING_JIOSTAR", "false").lower() == "true"
+DATABASE_UPLOAD_MODE = os.getenv("DATABASE_UPLOAD_MODE", "false").lower() == "true"
 last_delivery_error = None
 app = Client("ott_updates", api_id=int(os.environ["API_ID"]), api_hash=os.environ["API_HASH"], bot_token=os.environ["BOT_TOKEN"])
 pool = None
@@ -252,6 +254,9 @@ async def destination_diagnostics():
 
 async def loop():
     while True:
+        if DATABASE_UPLOAD_MODE:
+            await asyncio.sleep(INTERVAL * 60)
+            continue
         try:
             await scan()
             await scan_official()
@@ -283,6 +288,8 @@ async def listings(_, m):
 async def check(_, m):
     if m.from_user.id not in ADMINS:
         return
+    if DATABASE_UPLOAD_MODE:
+        return await m.reply_text("Database upload mode active: new files trigger movie announcements.")
     n = await scan()
     official = await scan_official()
     newsroom = await scan_newsroom()
@@ -315,7 +322,8 @@ async def autostatus(_, m):
         return
     destination = await destination_diagnostics()
     await m.reply_text(
-        f"Auto-publish: {AUTO_PUBLISH}\n"
+        f"Database upload mode: {DATABASE_UPLOAD_MODE}\n"
+        f"Auto-publish: {AUTO_PUBLISH and not DATABASE_UPLOAD_MODE}\n"
         f"JioStar discovery: {ENABLE_JIOSTAR_NEWSROOM}\n"
         f"JioStar auto-publish: {AUTO_PUBLISH_JIOSTAR}\n"
         f"Pending recheck: {RECHECK_PENDING}\n"
@@ -430,12 +438,16 @@ async def reject(_, m):
     await sql("UPDATE releases SET status='rejected' WHERE id=%s AND status='pending'", (ident,))
     await m.reply_text("Rejected if pending.")
 
+register_upload_announcements(app, sql)
+
 async def main():
     global pool
     pool = await aiomysql.create_pool(host=os.getenv("MYSQL_HOST","127.0.0.1"),
         port=int(os.getenv("MYSQL_PORT","3306")),user=os.environ["MYSQL_USER"],
         password=os.environ["MYSQL_PASSWORD"],db=os.getenv("MYSQL_DATABASE","ott_updates"),
         autocommit=True)
+    if DATABASE_UPLOAD_MODE:
+        await initialize_upload_announcements(sql)
     await app.start()
     log.info("Target diagnostics: %s", await destination_diagnostics())
     task = asyncio.create_task(loop())
