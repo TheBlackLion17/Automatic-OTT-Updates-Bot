@@ -14,6 +14,8 @@ def clean_newsroom_title(headline):
     if not headline:
         return ""
     # Preserve the source's named title; stop before the newsroom's streaming announcement.
+    headline = re.sub(r"^Hotstar Specials\s+", "", headline, flags=re.I)
+    headline = re.split(r"\s+(?:on JioHotstar from|streaming from|to stream on|premieres? on|trailer out now|the (?:film|series) (?:features|marks))\b", headline, maxsplit=1, flags=re.I)[0].strip(" -–—:‘’“”\"\'")
     m = SUFFIX.search(headline)
     if not m:
         return headline[:255]
