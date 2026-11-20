@@ -46,3 +46,9 @@ ALLOWED_PLATFORMS=Netflix
 The feed is only a transport: source trust and factual accuracy still depend on the operator maintaining the feed and the official announcement URL. The bot checks required fields, exact approved HTTPS domains, platform allowlists, non-past dates and duplicates; it **cannot independently prove that an official webpage actually confirms the release date**. Ordinary RSS headlines remain in the pending queue and are never auto-published. If no trusted JSON feed is configured, no automatic publishing occurs. No new MySQL tables are needed.
 
 Run tests: `venv/bin/python -m unittest -v test_official_discovery`. Before deploying, verify the configured feed and destination chat. The `sending` status requires manual reconciliation if a Telegram send has an uncertain result.
+
+## Official announcement webpage verification
+
+Automatic publishing now additionally requires `VERIFY_OFFICIAL_PAGE=true` (default). The bot fetches the configured official source URL (HTTPS, exact approved hostname, no redirects, HTML only, 750 KB limit), extracts visible text, and requires the full release title and explicit full release date to appear. A failed check leaves the release pending for manual review. Setting `VERIFY_OFFICIAL_PAGE=false` disables auto-publishing rather than bypassing this safety check.
+
+This is a conservative text-matching safeguard, **not** independent semantic fact checking. A webpage may mention a title and date without confirming a premiere; pages requiring JavaScript may fail. A trusted structured JSON feed still must be operated/provided separately: the bot does not yet discover official feeds or generate them from platform websites. Do not enable unattended publishing without validating a real source. Run `venv/bin/python -m unittest -v test_official_discovery test_official_page_verifier`.
