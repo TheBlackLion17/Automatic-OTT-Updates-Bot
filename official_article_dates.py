@@ -7,7 +7,6 @@ from urllib.parse import urlsplit
 MONTH = r"(?:January|February|March|April|May|June|July|August|September|October|November|December)"
 PATTERNS = (
     re.compile(r"\b(?:stream(?:ing)?|premier(?:e|es|ing))\s+on\s+JioHotstar\s+(?:from|on)\s+("+MONTH+r"\s+\d{1,2},?\s+20\d{2})\b", re.I),
-    re.compile(r"\bJioHotstar\s+(?:from|on)\s+("+MONTH+r"\s+\d{1,2},?\s+20\d{2})\b", re.I),
 )
 class Visible(HTMLParser):
     def __init__(self):
