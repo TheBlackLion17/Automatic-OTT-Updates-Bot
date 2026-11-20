@@ -5,6 +5,7 @@ import aiohttp, aiomysql, feedparser
 from dotenv import load_dotenv
 from pyrogram import Client, filters, idle
 from pyrogram.enums import ParseMode
+from official_discovery import discover
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 load_dotenv()
@@ -14,6 +15,11 @@ ADMINS = {int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip()}
 TARGET = int(os.environ["TARGET_CHAT_ID"])
 FEEDS = [x.strip() for x in os.getenv("RSS_FEEDS", "").split(",") if x.strip()]
 INTERVAL = max(5, int(os.getenv("CHECK_INTERVAL_MINUTES", "60")))
+OFFICIAL_FEEDS = [x.strip() for x in os.getenv("OFFICIAL_JSON_FEEDS", "").split(",") if x.strip()]
+FEED_DOMAINS = set(filter(None, os.getenv("TRUSTED_FEED_DOMAINS", "").lower().split(",")))
+OFFICIAL_DOMAINS = set(filter(None, os.getenv("OFFICIAL_SOURCE_DOMAINS", "").lower().split(",")))
+PLATFORMS = set(filter(None, os.getenv("ALLOWED_PLATFORMS", "").casefold().split(",")))
+AUTO_PUBLISH = os.getenv("AUTO_PUBLISH_VERIFIED", "false").lower() == "true"
 app = Client("ott_updates", api_id=int(os.environ["API_ID"]), api_hash=os.environ["API_HASH"], bot_token=os.environ["BOT_TOKEN"])
 pool = None
 
@@ -63,10 +69,46 @@ async def scan():
                 log.exception("Feed failed: %s", url)
     return count
 
+async def publish_release(r):
+    buttons = []
+    for label, field in (("🎞 Trailer", "trailer_url"), ("🔗 Official source", "source_url")):
+        if valid_url(r.get(field) or ""):
+            buttons.append([InlineKeyboardButton(label, url=r[field])])
+    msg = await app.send_message(
+        TARGET, render(r), parse_mode=ParseMode.HTML,
+        reply_markup=InlineKeyboardMarkup(buttons) if buttons else None,
+        disable_web_page_preview=True
+    )
+    await sql("UPDATE releases SET status='published',published_message_id=%s,published_at=NOW() WHERE id=%s",
+              (msg.id, r["id"]))
+
+async def scan_official():
+    if not (AUTO_PUBLISH and OFFICIAL_FEEDS and FEED_DOMAINS and OFFICIAL_DOMAINS and PLATFORMS):
+        return 0
+    timeout = aiohttp.ClientTimeout(total=20)
+    async with aiohttp.ClientSession(timeout=timeout, headers={"User-Agent": "MoviesHubOTT/1.0"}) as session:
+        items = await discover(session, OFFICIAL_FEEDS, FEED_DOMAINS, OFFICIAL_DOMAINS, PLATFORMS)
+    published = 0
+    for item in items:
+        await sql("INSERT IGNORE INTO releases (title,platform,language,release_date,trailer_url,summary,source_url,source_key,status) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'pending')",
+                  tuple(item[k] for k in ("title","platform","language","release_date","trailer_url","summary","source_url","source_key")))
+        rows = await sql("SELECT * FROM releases WHERE source_key=%s AND status='pending'", (item["source_key"],), True)
+        if not rows:
+            continue
+        r = rows[0]
+        await sql("UPDATE releases SET status='sending' WHERE id=%s AND status='pending'", (r["id"],))
+        try:
+            await publish_release(r)
+            published += 1
+        except Exception:
+            log.exception("Automatic delivery uncertain for release %s", r["id"])
+    return published
+
 async def loop():
     while True:
         try:
             await scan()
+            await scan_official()
         except Exception:
             log.exception("Scan failed")
         await asyncio.sleep(INTERVAL * 60)
@@ -135,18 +177,11 @@ async def approve(_, m):
         return await m.reply_text("Not found or already processed.")
     r = rows[0]
     await sql("UPDATE releases SET status='sending' WHERE id=%s AND status='pending'", (ident,))
-    buttons = []
-    for label, field in (("🎞 Trailer","trailer_url"),("🔗 Source","source_url")):
-        if valid_url(r.get(field) or ""):
-            buttons.append([InlineKeyboardButton(label,url=r[field])])
     try:
-        msg = await app.send_message(TARGET, render(r), parse_mode=ParseMode.HTML,
-                                     reply_markup=InlineKeyboardMarkup(buttons) if buttons else None,
-                                     disable_web_page_preview=True)
+        await publish_release(r)
     except Exception:
         log.exception("Delivery failed; review before retry")
         return await m.reply_text("Delivery uncertain; status remains sending to prevent duplicate retries.")
-    await sql("UPDATE releases SET status='published',published_message_id=%s,published_at=NOW() WHERE id=%s", (msg.id,ident))
     await m.reply_text("Published.")
 
 @app.on_message(filters.command("reject") & filters.private)
