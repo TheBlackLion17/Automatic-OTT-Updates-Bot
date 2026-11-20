@@ -8,7 +8,10 @@ import re
 from urllib.parse import quote
 
 import aiohttp
+from dotenv import load_dotenv
 from pyrogram import filters
+
+load_dotenv()
 
 log = logging.getLogger("ott.uploads")
 
