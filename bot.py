@@ -7,6 +7,7 @@ from pyrogram import Client, filters, idle
 from pyrogram.enums import ParseMode
 from official_discovery import discover
 from official_newsroom import discover_jiostar
+from release_review import clean_newsroom_title, extract_explicit_languages, publication_issues
 from official_page_verifier import verify_official_page
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -138,9 +139,9 @@ async def scan_newsroom():
         if existing:
             continue
         await sql(
-            "INSERT IGNORE INTO releases(title,source_url,source_key,platform,summary,status) "
-            "VALUES(%s,%s,%s,%s,%s,'pending')",
-            (item["title"], item["source_url"], item["source_key"], item["platform"], item["summary"])
+            "INSERT IGNORE INTO releases(title,source_url,source_key,platform,language,summary,status) "
+            "VALUES(%s,%s,%s,%s,%s,%s,'pending')",
+            (clean_newsroom_title(item["title"]), item["source_url"], item["source_key"], item["platform"], extract_explicit_languages(item["title"]), item["summary"])
         )
         count += 1
     if count:
@@ -210,6 +211,52 @@ async def add(_, m):
               (title[:255],platform[:100],language[:100],day,trailer,summary,ident))
     await m.reply_text("Added to pending queue. Use /pending then /approve ID.")
 
+@app.on_message(filters.command("viewrelease") & filters.private)
+async def viewrelease(_, m):
+    if m.from_user.id not in ADMINS:
+        return
+    try:
+        ident = int(m.command[1])
+    except (IndexError, ValueError):
+        return await m.reply_text("Usage: /viewrelease ID")
+    rows = await sql("SELECT * FROM releases WHERE id=%s", (ident,), True)
+    if not rows:
+        return await m.reply_text("Release not found.")
+    r = rows[0]
+    fields = ("title", "platform", "language", "release_date", "source_url", "trailer_url", "summary", "status")
+    message = "\n".join(f"{key}: {r.get(key) or 'NOT SET'}" for key in fields)
+    problems = publication_issues(r)
+    await m.reply_text(f"Release #{ident}\n{message}\n\n" +
+                       ("Missing/invalid: " + ", ".join(problems) if problems else "Ready for admin approval."),
+                       disable_web_page_preview=True)
+
+@app.on_message(filters.command("editrelease") & filters.private)
+async def editrelease(_, m):
+    if m.from_user.id not in ADMINS:
+        return
+    import re
+    raw = m.text.partition(" ")[2].strip()
+    match = re.fullmatch(r"(\d+)\s+(title|platform|language|release_date|source_url|trailer_url|summary)\s*\|\s*(.*)", raw, re.I | re.S)
+    if not match:
+        return await m.reply_text("Usage: /editrelease ID field | value\nFields: title, platform, language, release_date, source_url, trailer_url, summary")
+    ident, field, value = int(match[1]), match[2].lower(), match[3].strip()
+    if field in ("title", "platform", "language") and (not value or len(value) > (255 if field == "title" else 100)):
+        return await m.reply_text("A nonempty value within the field length limit is required.")
+    if field == "release_date":
+        try:
+            date.fromisoformat(value)
+        except ValueError:
+            return await m.reply_text("Date must be YYYY-MM-DD and verified against the official announcement.")
+    if field == "source_url" and not valid_url(value):
+        return await m.reply_text("Official source URL must use HTTPS.")
+    if field == "trailer_url" and value and not valid_url(value):
+        return await m.reply_text("Trailer URL must use HTTPS.")
+    rows = await sql("SELECT id FROM releases WHERE id=%s AND status='pending'", (ident,), True)
+    if not rows:
+        return await m.reply_text("Only pending releases can be edited.")
+    await sql(f"UPDATE releases SET {field}=%s WHERE id=%s AND status='pending'", (value or None, ident))
+    await m.reply_text(f"Updated {field} for #{ident}. Verify the official source, then /viewrelease {ident}.")
+
 @app.on_message(filters.command("approve") & filters.private)
 async def approve(_, m):
     if m.from_user.id not in ADMINS:
@@ -222,6 +269,9 @@ async def approve(_, m):
     if not rows:
         return await m.reply_text("Not found or already processed.")
     r = rows[0]
+    problems = publication_issues(r)
+    if problems:
+        return await m.reply_text("Cannot publish. Missing/invalid: " + ", ".join(problems) + f"\nUse /viewrelease {ident} and /editrelease.")
     await sql("UPDATE releases SET status='sending' WHERE id=%s AND status='pending'", (ident,))
     try:
         await publish_release(r)
