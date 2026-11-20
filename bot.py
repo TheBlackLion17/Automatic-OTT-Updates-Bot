@@ -42,11 +42,13 @@ def valid_url(s):
     except Exception:
         return False
 
-async def sql(statement, args=(), fetch=False):
+async def sql(statement, args=(), fetch=False, affected=False):
     async with pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
             await cur.execute(statement, args)
-            return await cur.fetchall() if fetch else cur.lastrowid
+            if fetch:
+                return await cur.fetchall()
+            return cur.rowcount if affected else cur.lastrowid
 
 def render(r):
     e = lambda s: html.escape(str(s or "Not confirmed"))
