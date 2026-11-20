@@ -82,3 +82,30 @@ pending queue without verified platform/date metadata.
 
 Deployment: back up `.env`, pull `main`, run compilation and unit tests,
 restart only `ott-updates`, and test `/checknow` and `/pending`.
+
+## Official JioStar newsroom integration (opt-in)
+
+The bot can now inspect the [JioStar newsroom](https://www.jiostar.com/newsroom/)
+for headlines explicitly mentioning streaming or premieres on JioHotstar.
+It queues qualifying official-domain links with `status=pending`, leaving
+`release_date` and `language` unset because a headline alone cannot
+establish either reliably. It does **not** scrape media files, infer dates,
+or publish automatically. This collector is independent of structured JSON
+feeds and is disabled by default until tested on your VPS.
+
+In the VPS-only `.env`, set:
+
+```dotenv
+ENABLE_JIOSTAR_NEWSROOM=true
+AUTO_PUBLISH_VERIFIED=false
+CHECK_INTERVAL_MINUTES=180
+```
+
+Restart only `ott-updates`, send admin `/checknow`, then `/pending`.
+Review each source and manually confirm its release date and language before
+publication. Current `/approve ID` publishes the saved record as-is:
+**do not approve undated newsroom candidates**. A future admin edit
+command is needed for filling those fields. The newsroom may change its HTML,
+and zero candidates is not proof that there are no releases.
+
+Tests: `venv/bin/python -m unittest -v test_official_discovery test_official_page_verifier test_official_newsroom`.
