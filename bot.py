@@ -7,6 +7,7 @@ from pyrogram import Client, filters, idle
 from pyrogram.enums import ParseMode
 from official_discovery import discover
 from official_newsroom import discover_jiostar
+from official_article_dates import verify_jiostar_article
 from release_review import clean_newsroom_title, extract_explicit_languages, publication_issues
 from official_page_verifier import verify_official_page
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
@@ -25,6 +26,7 @@ PLATFORMS = set(filter(None, os.getenv("ALLOWED_PLATFORMS", "").casefold().split
 AUTO_PUBLISH = os.getenv("AUTO_PUBLISH_VERIFIED", "false").lower() == "true"
 ENABLE_JIOSTAR_NEWSROOM = os.getenv("ENABLE_JIOSTAR_NEWSROOM", "false").lower() == "true"
 VERIFY_OFFICIAL_PAGE = os.getenv("VERIFY_OFFICIAL_PAGE", "true").lower() == "true"
+AUTO_PUBLISH_JIOSTAR = os.getenv("AUTO_PUBLISH_JIOSTAR", "false").lower() == "true"
 app = Client("ott_updates", api_id=int(os.environ["API_ID"]), api_hash=os.environ["API_HASH"], bot_token=os.environ["BOT_TOKEN"])
 pool = None
 
@@ -134,25 +136,46 @@ async def scan_official():
         return added
 
 async def scan_newsroom():
-    """Queue official newsroom headlines, never infer release dates."""
+    """Discover JioStar articles; publish only explicitly dated, complete releases."""
     if not ENABLE_JIOSTAR_NEWSROOM:
         return 0
     timeout = aiohttp.ClientTimeout(total=20)
+    count = 0
     async with aiohttp.ClientSession(timeout=timeout, headers={"User-Agent": "MoviesHubOTT/1.0"}) as session:
         candidates = await discover_jiostar(session)
-    count = 0
-    for item in candidates:
-        existing = await sql("SELECT id FROM releases WHERE source_key=%s", (item["source_key"],), True)
-        if existing:
-            continue
-        await sql(
-            "INSERT IGNORE INTO releases(title,source_url,source_key,platform,language,summary,status) "
-            "VALUES(%s,%s,%s,%s,%s,%s,'pending')",
-            (clean_newsroom_title(item["title"]), item["source_url"], item["source_key"], item["platform"], extract_explicit_languages(item["title"]), item["summary"])
-        )
-        count += 1
+        for item in candidates:
+            existing = await sql("SELECT id FROM releases WHERE source_key=%s", (item["source_key"],), True)
+            if existing:
+                continue
+            title = clean_newsroom_title(item["title"])
+            language = extract_explicit_languages(item["title"])
+            release_day = None
+            if AUTO_PUBLISH_JIOSTAR and AUTO_PUBLISH and VERIFY_OFFICIAL_PAGE and language:
+                try:
+                    release_day = await verify_jiostar_article(
+                        session, {"source_url": item["source_url"], "title": title})
+                except Exception:
+                    log.exception("JioStar article verification failed: %s", item["source_url"])
+            ident = await sql(
+                "INSERT IGNORE INTO releases(title,source_url,source_key,platform,language,release_date,summary,status) "
+                "VALUES(%s,%s,%s,%s,%s,%s,%s,'pending')",
+                (title, item["source_url"], item["source_key"], item["platform"],
+                 language, release_day, item["summary"])
+            )
+            if not ident:
+                continue
+            count += 1
+            if release_day:
+                rows = await sql("SELECT * FROM releases WHERE id=%s AND status='pending'", (ident,), True)
+                if rows and not publication_issues(rows[0]):
+                    await sql("UPDATE releases SET status='sending' WHERE id=%s AND status='pending'", (ident,))
+                    try:
+                        await publish_release(rows[0])
+                        log.info("Auto-published dated official JioStar release %s", ident)
+                    except Exception:
+                        log.exception("JioStar delivery uncertain for %s; left sending", ident)
     if count:
-        log.info("Queued up to %d official newsroom headlines for manual review", count)
+        log.info("Imported %d new JioStar articles (undated remain pending)", count)
     return count
 
 async def loop():
