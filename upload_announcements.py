@@ -44,7 +44,7 @@ def extract_title(message):
     raw = re.sub(r"[._]+", " ", raw)
 
     # Remove leading bracketed release/channel tags, not the movie's year.
-    raw = re.sub(r"^(?:\s*[\[(][^\])]{1,35}[\])]\s*[-–|:]?\s*)+", "", raw)
+    raw = re.sub(r"^(?:\s*\[[^\]]{1,35}\]\s*[-–|:]?\s*)+", "", raw)
     # Remove common unbracketed channel prefixes followed by a separator.
     raw = re.sub(
         r"^(?:(?:MS|Movie[Ss]?|MoviesHub|AGS|TG|Telegram|Channel)"
