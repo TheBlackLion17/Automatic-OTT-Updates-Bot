@@ -140,3 +140,8 @@ Run tests: `venv/bin/python -m unittest -v test_official_discovery test_official
 **Safety:** Leave `AUTO_PUBLISH_VERIFIED=false`. Manual approval validates
 required fields, not the factual correctness of an announcement. Never enter
 a year inferred from the current calendar or a headline lacking a year.
+
+
+### Unattended verified publishing
+
+Set `AUTO_PUBLISH_VERIFIED=true` **only** after configuring `OFFICIAL_JSON_FEEDS`, `TRUSTED_FEED_DOMAINS`, `OFFICIAL_SOURCE_DOMAINS`, and `ALLOWED_PLATFORMS`, and retain `VERIFY_OFFICIAL_PAGE=true`. Newly discovered structured announcements are published automatically only when the official page verification succeeds and the release has complete title, platform, language, date, and HTTPS source. RSS headlines and JioStar newsroom headlines remain pending for review because their release dates are not reliably verified. Existing pending or `sending` records are never automatically retried. If Telegram delivery is uncertain, the record stays `sending` to avoid duplicates. No automatic posts occur without a configured trusted structured feed.
