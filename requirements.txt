@@ -4,3 +4,4 @@ aiomysql>=0.2,<1
 python-dotenv>=1,<2
 aiohttp>=3.10,<4
 feedparser>=6,<7
+cryptography>=42,<51
