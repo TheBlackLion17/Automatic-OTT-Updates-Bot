@@ -85,30 +85,43 @@ async def publish_release(r):
               (msg.id, r["id"]))
 
 async def scan_official():
-    if not (AUTO_PUBLISH and VERIFY_OFFICIAL_PAGE and OFFICIAL_FEEDS and FEED_DOMAINS and OFFICIAL_DOMAINS and PLATFORMS):
+    """Import trusted structured announcements into the review queue.
+
+    Discovery is independent of AUTO_PUBLISH_VERIFIED. Nothing from this
+    collector is published automatically; an admin must use /approve ID.
+    """
+    if not (OFFICIAL_FEEDS and FEED_DOMAINS and OFFICIAL_DOMAINS and PLATFORMS):
         return 0
     timeout = aiohttp.ClientTimeout(total=20)
     async with aiohttp.ClientSession(timeout=timeout, headers={"User-Agent": "MoviesHubOTT/1.0"}) as session:
         items = await discover(session, OFFICIAL_FEEDS, FEED_DOMAINS, OFFICIAL_DOMAINS, PLATFORMS)
-    published = 0
-    async with aiohttp.ClientSession(timeout=timeout, headers={"User-Agent": "MoviesHubOTT/1.0"}) as verify_session:
+        added = 0
         for item in items:
-            await sql("INSERT IGNORE INTO releases (title,platform,language,release_date,trailer_url,summary,source_url,source_key,status) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'pending')",
-                      tuple(item[k] for k in ("title","platform","language","release_date","trailer_url","summary","source_url","source_key")))
-            rows = await sql("SELECT * FROM releases WHERE source_key=%s AND status='pending'", (item["source_key"],), True)
-            if not rows:
+            # Only insert genuinely new records. Never reset an existing status.
+            existing = await sql("SELECT id FROM releases WHERE source_key=%s", (item["source_key"],), True)
+            if existing:
                 continue
-            r = rows[0]
-            if not await verify_official_page(verify_session, item, OFFICIAL_DOMAINS):
-                log.info("Official page did not confirm title and date for release %s", r["id"])
-                continue
-            await sql("UPDATE releases SET status='sending' WHERE id=%s AND status='pending'", (r["id"],))
-            try:
-                await publish_release(r)
-                published += 1
-            except Exception:
-                log.exception("Automatic delivery uncertain for release %s", r["id"])
-        return published
+            if VERIFY_OFFICIAL_PAGE:
+                try:
+                    if not await verify_official_page(session, item, OFFICIAL_DOMAINS):
+                        log.info("Official page not confirmed: %s", item["source_url"])
+                        continue
+                except Exception:
+                    log.exception("Official page verification failed: %s", item["source_url"])
+                    continue
+            await sql(
+                "INSERT IGNORE INTO releases "
+                "(title,platform,language,release_date,trailer_url,summary,source_url,source_key,status) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'pending')",
+                tuple(item[k] for k in (
+                    "title", "platform", "language", "release_date",
+                    "trailer_url", "summary", "source_url", "source_key"
+                ))
+            )
+            added += 1
+        if added:
+            log.info("Imported up to %d official announcements for admin review", added)
+        return added
 
 async def loop():
     while True:
@@ -142,7 +155,8 @@ async def check(_, m):
     if m.from_user.id not in ADMINS:
         return
     n = await scan()
-    await m.reply_text(f"Feed scan complete. Processed up to {n} headlines; duplicates are ignored.")
+    official = await scan_official()
+    await m.reply_text(f"Scan complete. Processed up to {n} RSS headlines and {official} new official candidates. Review with /pending.")
 
 @app.on_message(filters.command("pending") & filters.private)
 async def pending(_, m):
