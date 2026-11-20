@@ -145,3 +145,17 @@ a year inferred from the current calendar or a headline lacking a year.
 ### Unattended verified publishing
 
 Set `AUTO_PUBLISH_VERIFIED=true` **only** after configuring `OFFICIAL_JSON_FEEDS`, `TRUSTED_FEED_DOMAINS`, `OFFICIAL_SOURCE_DOMAINS`, and `ALLOWED_PLATFORMS`, and retain `VERIFY_OFFICIAL_PAGE=true`. Newly discovered structured announcements are published automatically only when the official page verification succeeds and the release has complete title, platform, language, date, and HTTPS source. RSS headlines and JioStar newsroom headlines remain pending for review because their release dates are not reliably verified. Existing pending or `sending` records are never automatically retried. If Telegram delivery is uncertain, the record stays `sending` to avoid duplicates. No automatic posts occur without a configured trusted structured feed.
+
+## Opt-in unattended JioStar updates (November 2026)
+
+A separate JioStar article verifier can automatically publish **new** newsroom announcements only when all of the following hold: the official HTTPS article explicitly says a title is streaming/premiering on JioHotstar from/on a full Month DD, YYYY date; the date is today or later; the title appears in the article; a language is explicitly present in the newsroom headline; and the article is an HTML response from the exact JioStar hostname without redirects. Ambiguous or incomplete announcements remain pending. This is strict text extraction, not semantic fact-checking; operators should monitor accuracy. Articles with a month/day but no year will not publish automatically.
+
+Enable on the VPS after testing:
+```dotenv
+ENABLE_JIOSTAR_NEWSROOM=true
+AUTO_PUBLISH_VERIFIED=true
+VERIFY_OFFICIAL_PAGE=true
+AUTO_PUBLISH_JIOSTAR=true
+```
+
+The new `AUTO_PUBLISH_JIOSTAR` flag defaults to **false**. Existing pending records are deliberately not auto-published or silently modified. Existing `sending` records are never retried automatically because Telegram may already have delivered the message. Other platforms still require a configured trusted structured feed. Run `venv/bin/python -m unittest -v test_official_article_dates` and review the channel before enabling unattended delivery.
