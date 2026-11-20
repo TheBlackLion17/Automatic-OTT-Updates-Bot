@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from pyrogram import Client, filters, idle
 from pyrogram.enums import ParseMode
 from official_discovery import discover
+from official_newsroom import discover_jiostar
 from official_page_verifier import verify_official_page
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -21,6 +22,7 @@ FEED_DOMAINS = set(filter(None, os.getenv("TRUSTED_FEED_DOMAINS", "").lower().sp
 OFFICIAL_DOMAINS = set(filter(None, os.getenv("OFFICIAL_SOURCE_DOMAINS", "").lower().split(",")))
 PLATFORMS = set(filter(None, os.getenv("ALLOWED_PLATFORMS", "").casefold().split(",")))
 AUTO_PUBLISH = os.getenv("AUTO_PUBLISH_VERIFIED", "false").lower() == "true"
+ENABLE_JIOSTAR_NEWSROOM = os.getenv("ENABLE_JIOSTAR_NEWSROOM", "false").lower() == "true"
 VERIFY_OFFICIAL_PAGE = os.getenv("VERIFY_OFFICIAL_PAGE", "true").lower() == "true"
 app = Client("ott_updates", api_id=int(os.environ["API_ID"]), api_hash=os.environ["API_HASH"], bot_token=os.environ["BOT_TOKEN"])
 pool = None
@@ -123,11 +125,34 @@ async def scan_official():
             log.info("Imported up to %d official announcements for admin review", added)
         return added
 
+async def scan_newsroom():
+    """Queue official newsroom headlines, never infer release dates."""
+    if not ENABLE_JIOSTAR_NEWSROOM:
+        return 0
+    timeout = aiohttp.ClientTimeout(total=20)
+    async with aiohttp.ClientSession(timeout=timeout, headers={"User-Agent": "MoviesHubOTT/1.0"}) as session:
+        candidates = await discover_jiostar(session)
+    count = 0
+    for item in candidates:
+        existing = await sql("SELECT id FROM releases WHERE source_key=%s", (item["source_key"],), True)
+        if existing:
+            continue
+        await sql(
+            "INSERT IGNORE INTO releases(title,source_url,source_key,platform,summary,status) "
+            "VALUES(%s,%s,%s,%s,%s,'pending')",
+            (item["title"], item["source_url"], item["source_key"], item["platform"], item["summary"])
+        )
+        count += 1
+    if count:
+        log.info("Queued up to %d official newsroom headlines for manual review", count)
+    return count
+
 async def loop():
     while True:
         try:
             await scan()
             await scan_official()
+            await scan_newsroom()
         except Exception:
             log.exception("Scan failed")
         await asyncio.sleep(INTERVAL * 60)
@@ -156,7 +181,8 @@ async def check(_, m):
         return
     n = await scan()
     official = await scan_official()
-    await m.reply_text(f"Scan complete. Processed up to {n} RSS headlines and {official} new official candidates. Review with /pending.")
+    newsroom = await scan_newsroom()
+    await m.reply_text(f"Scan complete: up to {n} RSS headlines, {official} structured official candidates and {newsroom} JioStar newsroom headlines. Review with /pending.")
 
 @app.on_message(filters.command("pending") & filters.private)
 async def pending(_, m):
