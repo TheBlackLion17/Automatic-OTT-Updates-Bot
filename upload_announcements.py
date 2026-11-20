@@ -33,18 +33,33 @@ async def initialize(sql):
 
 
 def extract_title(message):
+    """Extract a movie title without release-group tags or encoding metadata."""
     media = message.document or message.video
     if not media:
         return None
     filename = getattr(media, "file_name", None)
-    raw = filename or (message.caption or "").splitlines()[0] if (filename or message.caption) else ""
-    raw = re.sub(r"\.(mkv|mp4|avi|mov|webm|m4v)$", "", raw.strip(), flags=re.I)
+    caption = (message.caption or "").splitlines()
+    raw = filename or (caption[0] if caption else "")
+    raw = re.sub(r"\.(?:mkv|mp4|avi|mov|webm|m4v)$", "", raw.strip(), flags=re.I)
     raw = re.sub(r"[._]+", " ", raw)
+
+    # Remove leading bracketed release/channel tags, not the movie's year.
+    raw = re.sub(r"^(?:\s*[\[(][^\])]{1,35}[\])]\s*[-–|:]?\s*)+", "", raw)
+    # Remove common unbracketed channel prefixes followed by a separator.
+    raw = re.sub(
+        r"^(?:(?:MS|Movie[Ss]?|MoviesHub|AGS|TG|Telegram|Channel)"
+        r"\s*\]\s*[-–|:]?\s*|"
+        r"(?:MS|MoviesHub|AGS)\s*[-–|:]\s*)+",
+        "", raw, flags=re.I
+    )
+    # Strip technical metadata from the first quality/episode marker onward.
     raw = re.split(
-        r"\b(?:S\d{1,2}E\d{1,3}|S\d{1,2}|720p|1080p|2160p|480p|4K|HEVC|x264|x265|WEB[- ]?DL|BluRay|HDRip|Malayalam|Hindi|Tamil|Telugu|English)\b",
+        r"\b(?:S\d{1,2}E\d{1,3}|S\d{1,2}|720p|1080p|2160p|480p|4K|"
+        r"HEVC|x264|x265|WEB[- ]?DL|BluRay|HDRip|Malayalam|Hindi|Tamil|"
+        r"Telugu|English)\b",
         raw, maxsplit=1, flags=re.I
     )[0]
-    title = re.sub(r"\s+", " ", raw).strip(" -[]()")
+    title = re.sub(r"\s+", " ", raw).strip(" -–|[]()")
     if not title or len(title) > 180 or not re.search(r"[A-Za-z0-9]", title):
         return None
     return title
