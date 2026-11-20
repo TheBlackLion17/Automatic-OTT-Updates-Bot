@@ -8,6 +8,7 @@ from pyrogram.enums import ParseMode
 from official_discovery import discover
 from official_newsroom import discover_jiostar
 from official_article_dates import verify_jiostar_article
+from pending_recheck import recheck_pending
 from release_review import clean_newsroom_title, extract_explicit_languages, publication_issues
 from official_page_verifier import verify_official_page
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
@@ -27,6 +28,8 @@ AUTO_PUBLISH = os.getenv("AUTO_PUBLISH_VERIFIED", "false").lower() == "true"
 ENABLE_JIOSTAR_NEWSROOM = os.getenv("ENABLE_JIOSTAR_NEWSROOM", "false").lower() == "true"
 VERIFY_OFFICIAL_PAGE = os.getenv("VERIFY_OFFICIAL_PAGE", "true").lower() == "true"
 AUTO_PUBLISH_JIOSTAR = os.getenv("AUTO_PUBLISH_JIOSTAR", "false").lower() == "true"
+RECHECK_PENDING = os.getenv("RECHECK_PENDING_JIOSTAR", "false").lower() == "true"
+last_delivery_error = None
 app = Client("ott_updates", api_id=int(os.environ["API_ID"]), api_hash=os.environ["API_HASH"], bot_token=os.environ["BOT_TOKEN"])
 pool = None
 
@@ -86,6 +89,7 @@ async def publish_release(r):
         reply_markup=InlineKeyboardMarkup(buttons) if buttons else None,
         disable_web_page_preview=True
     )
+    log.info("Telegram accepted release %s as message %s", r["id"], msg.id)
     await sql("UPDATE releases SET status='published',published_message_id=%s,published_at=NOW() WHERE id=%s",
               (msg.id, r["id"]))
 
@@ -178,12 +182,44 @@ async def scan_newsroom():
         log.info("Imported %d new JioStar articles (undated remain pending)", count)
     return count
 
+
+async def publish_claimed(r):
+    global last_delivery_error
+    await sql("UPDATE releases SET status='sending' WHERE id=%s AND status='pending'", (r["id"],))
+    try:
+        await publish_release(r)
+        return True
+    except Exception as exc:
+        last_delivery_error = f"{type(exc).__name__}: {str(exc)[:180]}"
+        log.exception("Delivery uncertain for %s; left sending", r["id"])
+        return False
+
+async def recheck_existing():
+    return await recheck_pending(
+        sql, publish_claimed,
+        RECHECK_PENDING and AUTO_PUBLISH and AUTO_PUBLISH_JIOSTAR and VERIFY_OFFICIAL_PAGE
+    )
+
+async def destination_diagnostics():
+    try:
+        me = await app.get_me()
+        chat = await app.get_chat(TARGET)
+        member = await app.get_chat_member(TARGET, me.id)
+        privileges = getattr(member, "privileges", None)
+        return (f"chat={getattr(chat, 'title', None) or TARGET}; "
+                f"member={member.status}; "
+                f"can_post_messages={getattr(privileges, 'can_post_messages', 'not applicable')}")
+    except Exception as exc:
+        log.warning("Target permission check failed: %s", exc)
+        return f"Unable to verify: {type(exc).__name__}: {str(exc)[:120]}"
+
 async def loop():
     while True:
         try:
             await scan()
             await scan_official()
             await scan_newsroom()
+            await recheck_existing()
         except Exception:
             log.exception("Scan failed")
         await asyncio.sleep(INTERVAL * 60)
@@ -213,7 +249,43 @@ async def check(_, m):
     n = await scan()
     official = await scan_official()
     newsroom = await scan_newsroom()
-    await m.reply_text(f"Scan complete: up to {n} RSS headlines, {official} structured official candidates and {newsroom} JioStar newsroom headlines. Review with /pending.")
+    verified = await recheck_existing()
+    await m.reply_text(f"Scan complete: up to {n} RSS headlines, {official} structured official candidates and {newsroom} JioStar newsroom headlines. Verified pending: {verified}. Review with /pending.")
+
+
+@app.on_message(filters.command("stats") & filters.private)
+async def stats(_, m):
+    if m.from_user.id not in ADMINS:
+        return
+    rows = await sql("SELECT status,COUNT(*) AS total FROM releases GROUP BY status", fetch=True)
+    counts = {r["status"]: r["total"] for r in rows}
+    await m.reply_text("OTT release counts\n" + "\n".join(
+        f"{key}: {counts.get(key, 0)}" for key in ("pending", "sending", "published", "rejected")))
+
+@app.on_message(filters.command("failed") & filters.private)
+async def failed(_, m):
+    if m.from_user.id not in ADMINS:
+        return
+    rows = await sql("SELECT id,title,published_message_id FROM releases WHERE status='sending' ORDER BY id DESC LIMIT 20", fetch=True)
+    lines = [f"#{r['id']} {r['title'][:80]} (message: {r['published_message_id'] or 'unknown'})" for r in rows]
+    await m.reply_text("Uncertain deliveries (not necessarily failed):\n" +
+                       ("\n".join(lines) if lines else "None") +
+                       "\nCheck Telegram and logs before retrying.")
+
+@app.on_message(filters.command("autostatus") & filters.private)
+async def autostatus(_, m):
+    if m.from_user.id not in ADMINS:
+        return
+    destination = await destination_diagnostics()
+    await m.reply_text(
+        f"Auto-publish: {AUTO_PUBLISH}\n"
+        f"JioStar discovery: {ENABLE_JIOSTAR_NEWSROOM}\n"
+        f"JioStar auto-publish: {AUTO_PUBLISH_JIOSTAR}\n"
+        f"Pending recheck: {RECHECK_PENDING}\n"
+        f"Official page verification: {VERIFY_OFFICIAL_PAGE}\n"
+        f"Structured feed ready: {bool(OFFICIAL_FEEDS and FEED_DOMAINS and OFFICIAL_DOMAINS and PLATFORMS)}\n"
+        f"Target: {destination}\n"
+        f"Last delivery error: {last_delivery_error or 'none observed since startup'}")
 
 @app.on_message(filters.command("pending") & filters.private)
 async def pending(_, m):
@@ -328,6 +400,7 @@ async def main():
         password=os.environ["MYSQL_PASSWORD"],db=os.getenv("MYSQL_DATABASE","ott_updates"),
         autocommit=True)
     await app.start()
+    log.info("Target diagnostics: %s", await destination_diagnostics())
     task = asyncio.create_task(loop())
     try:
         await idle()
