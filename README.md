@@ -52,3 +52,33 @@ Run tests: `venv/bin/python -m unittest -v test_official_discovery`. Before depl
 Automatic publishing now additionally requires `VERIFY_OFFICIAL_PAGE=true` (default). The bot fetches the configured official source URL (HTTPS, exact approved hostname, no redirects, HTML only, 750 KB limit), extracts visible text, and requires the full release title and explicit full release date to appear. A failed check leaves the release pending for manual review. Setting `VERIFY_OFFICIAL_PAGE=false` disables auto-publishing rather than bypassing this safety check.
 
 This is a conservative text-matching safeguard, **not** independent semantic fact checking. A webpage may mention a title and date without confirming a premiere; pages requiring JavaScript may fail. A trusted structured JSON feed still must be operated/provided separately: the bot does not yet discover official feeds or generate them from platform websites. Do not enable unattended publishing without validating a real source. Run `venv/bin/python -m unittest -v test_official_discovery test_official_page_verifier`.
+
+## Manual-review official discovery (recommended)
+
+The periodic scanner and admin `/checknow` now import valid announcements from
+`OFFICIAL_JSON_FEEDS` into the existing `releases` table with status
+`pending`, **even when `AUTO_PUBLISH_VERIFIED=false`**. Admins review
+with `/pending` and publish using `/approve ID` or discard with
+`/reject ID`. Automatic publication is not used by this collector.
+
+Configure in the VPS-only `.env`:
+
+```dotenv
+AUTO_PUBLISH_VERIFIED=false
+VERIFY_OFFICIAL_PAGE=true
+OFFICIAL_JSON_FEEDS=https://YOUR-TRUSTED-FEED-HOST/ott.json
+TRUSTED_FEED_DOMAINS=YOUR-TRUSTED-FEED-HOST
+OFFICIAL_SOURCE_DOMAINS=www.netflix.com,netflix.com
+ALLOWED_PLATFORMS=Netflix,Prime Video,JioHotstar,SonyLIV,ZEE5
+CHECK_INTERVAL_MINUTES=180
+```
+
+**Replace the placeholders with a real, operator-verified HTTPS JSON feed and
+its exact hostname. No live feed is bundled or implied by these examples.**
+The official webpage verifier checks that title and date appear on the page,
+but cannot establish the meaning of that date. Human approval remains mandatory.
+The existing `RSS_FEEDS` collector is separate: RSS headlines can enter the
+pending queue without verified platform/date metadata.
+
+Deployment: back up `.env`, pull `main`, run compilation and unit tests,
+restart only `ott-updates`, and test `/checknow` and `/pending`.
