@@ -72,9 +72,9 @@ def register(app, sql):
         # INSERT IGNORE atomically reserves title; uncertain sends stay reserved.
         reserved = await sql(
             "INSERT IGNORE INTO upload_announcements(title_hash,movie_title,source_message_id) VALUES(%s,%s,%s)",
-            (key, title, message.id)
+            (key, title, message.id), affected=True
         )
-        # INSERT IGNORE lastrowid can be 0 for duplicate rows.
+        # Affected rows is 1 for a new title, 0 for an existing title.
         if not reserved:
             return
         url = "https://t.me/" + AUTOFILTER + "?start=" + quote(payload, safe="")
