@@ -109,3 +109,34 @@ command is needed for filling those fields. The newsroom may change its HTML,
 and zero candidates is not proof that there are no releases.
 
 Tests: `venv/bin/python -m unittest -v test_official_discovery test_official_page_verifier test_official_newsroom`.
+
+## Admin review and safe publishing
+
+Newsroom candidates now receive conservative title cleanup and extraction of
+**explicitly mentioned** language names; no year or release date is inferred.
+A candidate is still unverified until an admin checks the official article.
+
+Commands (admin only):
+
+- `/viewrelease ID` — show all saved fields and missing publication requirements.
+- `/editrelease ID title | Correct title`
+- `/editrelease ID language | Malayalam, Tamil`
+- `/editrelease ID release_date | YYYY-MM-DD`
+- `/editrelease ID platform | JioHotstar`
+- `/editrelease ID source_url | https://www.jiostar.com/news/example/`
+- `/editrelease ID summary | Confirmed official announcement`
+- `/approve ID` — rejects missing/invalid title, platform, language,
+  release date, or HTTPS source URL. A human must verify that the source
+  actually confirms the date and language; URL syntax alone is not proof.
+
+For existing pending JioStar records, back up the database and run
+`venv/bin/python migrate_pending_newsroom.py` once. The migration preserves
+IDs, source keys, status and dates, and only cleans titles / extracts explicit
+languages. It can safely be rerun. Review any extracted languages because
+newsroom text may mention languages in other contexts.
+
+Run tests: `venv/bin/python -m unittest -v test_official_discovery test_official_page_verifier test_official_newsroom test_release_review`.
+
+**Safety:** Leave `AUTO_PUBLISH_VERIFIED=false`. Manual approval validates
+required fields, not the factual correctness of an announcement. Never enter
+a year inferred from the current calendar or a headline lacking a year.
