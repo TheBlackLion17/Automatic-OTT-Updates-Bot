@@ -205,17 +205,50 @@ async def recheck_existing():
     )
 
 async def destination_diagnostics():
+    """Check destination via Bot API, independently of Pyrogram's peer cache.
+
+    The token is never logged or included in returned diagnostics.
+    No message is sent and no database state is changed.
+    """
+    base = "https://api.telegram.org/bot" + os.environ["BOT_TOKEN"] + "/"
+    timeout = aiohttp.ClientTimeout(total=15)
     try:
-        me = await app.get_me()
-        chat = await app.get_chat(TARGET)
-        member = await app.get_chat_member(TARGET, me.id)
-        privileges = getattr(member, "privileges", None)
-        return (f"chat={getattr(chat, 'title', None) or TARGET}; "
-                f"member={member.status}; "
-                f"can_post_messages={getattr(privileges, 'can_post_messages', 'not applicable')}")
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async def call(method, payload):
+                async with session.post(base + method, data=payload) as response:
+                    data = await response.json(content_type=None)
+                    if not data.get("ok"):
+                        return None, str(data.get("description", "Unknown Telegram error"))[:160]
+                    return data["result"], None
+
+            chat, err = await call("getChat", {"chat_id": TARGET})
+            if err:
+                return "Bot API getChat failed: " + err + "; check target ID and bot access"
+            me, err = await call("getMe", {})
+            if err:
+                return "Bot API getMe failed: " + err
+            member, err = await call("getChatMember", {
+                "chat_id": TARGET, "user_id": me["id"]
+            })
+            if err:
+                return ("Bot API recognizes chat " + str(chat.get("title") or TARGET)
+                        + " but membership check failed: " + err)
+            status = member.get("status", "unknown")
+            chat_type = chat.get("type", "unknown")
+            can_post = member.get("can_post_messages")
+            if chat_type == "channel":
+                permitted = status == "creator" or (
+                    status == "administrator" and can_post is True)
+            else:
+                permitted = status in ("creator", "administrator")
+            return (f"Bot API: chat={chat.get('title') or TARGET}; "
+                    f"type={chat_type}; member={status}; "
+                    f"can_post_messages={can_post}; "
+                    f"channel_post_permission={'yes' if permitted else 'not confirmed'}")
     except Exception as exc:
-        log.warning("Target permission check failed: %s", exc)
-        return f"Unable to verify: {type(exc).__name__}: {str(exc)[:120]}"
+        # Never include the token-bearing request URL in user-visible errors.
+        log.warning("Bot API destination check failed (%s)", type(exc).__name__)
+        return f"Bot API check unavailable: {type(exc).__name__}"
 
 async def loop():
     while True:
