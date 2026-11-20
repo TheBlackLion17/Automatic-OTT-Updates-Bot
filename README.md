@@ -159,3 +159,13 @@ AUTO_PUBLISH_JIOSTAR=true
 ```
 
 The new `AUTO_PUBLISH_JIOSTAR` flag defaults to **false**. Existing pending records are deliberately not auto-published or silently modified. Existing `sending` records are never retried automatically because Telegram may already have delivered the message. Other platforms still require a configured trusted structured feed. Run `venv/bin/python -m unittest -v test_official_article_dates` and review the channel before enabling unattended delivery.
+
+## Operational improvements and safe rollout
+
+The newsroom title cleaner removes known trailing article descriptions. Full-year JioStar streaming dates must be explicitly stated on the official article page; missing years and conflicting dates are not guessed.
+
+Set RECHECK_PENDING_JIOSTAR=true in the VPS-only .env to opt in to periodic rechecking of existing pending JioHotstar records. Only records with an explicit or recorded language, a confirmed non-past date and a valid official article can publish. Existing sending, published and rejected records are never retried. Leave the flag false initially, inspect target permissions and investigate the unresolved sending record before enabling it. Enabling may publish eligible pending records immediately.
+
+Admin commands: /stats reports database status totals, /failed lists uncertain sending records (not necessarily failed), and /autostatus checks settings and Telegram destination permissions without sending a test message. Logs record the Telegram message ID after successful API delivery, before database state update. Never reset sending records without checking the target channel for duplicates.
+
+Run: venv/bin/python -m unittest discover -p 'test_*.py' -v. No destructive migration or bulk title changes are performed.
