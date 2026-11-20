@@ -185,10 +185,11 @@ async def scan_newsroom():
 
 async def publish_claimed(r):
     global last_delivery_error
-    await sql("UPDATE releases SET status='sending' WHERE id=%s AND status='pending'", (r["id"],))
-    fresh = await sql("SELECT status FROM releases WHERE id=%s", (r["id"],), True)
-    if not fresh or fresh[0]["status"] != "sending":
-        return False
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("UPDATE releases SET status='sending' WHERE id=%s AND status='pending'", (r["id"],))
+            if cur.rowcount != 1:
+                return False
     try:
         await publish_release(r)
         return True
