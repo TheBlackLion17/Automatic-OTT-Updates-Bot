@@ -169,3 +169,14 @@ Set RECHECK_PENDING_JIOSTAR=true in the VPS-only .env to opt in to periodic rech
 Admin commands: /stats reports database status totals, /failed lists uncertain sending records (not necessarily failed), and /autostatus checks settings and Telegram destination permissions without sending a test message. Logs record the Telegram message ID after successful API delivery, before database state update. Never reset sending records without checking the target channel for duplicates.
 
 Run: venv/bin/python -m unittest discover -p 'test_*.py' -v. No destructive migration or bulk title changes are performed.
+
+
+## Database-channel movie announcement mode
+
+Set `DATABASE_UPLOAD_MODE=true`, `SOURCE_CHANNEL_ID=-1002518840015`, and `AUTOFILTER_USERNAME=agsfilterV3_bot` in the private VPS `.env`. When enabled, RSS/OTT/JioStar polling is suspended and **only new document/video posts** in the source channel generate announcements. The bot must be an administrator of the source channel and destination channel. Existing release rows remain unchanged.
+
+Each title is announced once (case-insensitive) and its status is reserved in the `upload_announcements` MySQL table before sending. Delivery failures stay reserved to prevent duplicate announcements; investigate before manual retries. The update bot posts a title and a **Download Now** deep link, never media. Only future source posts are handled; this does not bulk-scan channel history.
+
+The URL uses `https://t.me/agsfilterV3_bot?start=search_<title>`. **The Auto Filter Bot must implement this exact /start payload convention to execute the search automatically**; otherwise Telegram merely opens the bot. Long/non-ASCII titles may require a separate mapping strategy for full-fidelity search.
+
+Deploy: `git pull --ff-only origin main`, `venv/bin/python -m py_compile bot.py upload_announcements.py`, configure `.env`, restart `ott-updates`, then post a new sample file and check logs. Do not upload test files until the Auto Filter Bot deep-link handler is verified.
