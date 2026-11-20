@@ -88,11 +88,7 @@ async def publish_release(r):
               (msg.id, r["id"]))
 
 async def scan_official():
-    """Import trusted structured announcements into the review queue.
-
-    Discovery is independent of AUTO_PUBLISH_VERIFIED. Nothing from this
-    collector is published automatically; an admin must use /approve ID.
-    """
+    """Import verified structured official announcements; optionally auto-publish only these."""
     if not (OFFICIAL_FEEDS and FEED_DOMAINS and OFFICIAL_DOMAINS and PLATFORMS):
         return 0
     timeout = aiohttp.ClientTimeout(total=20)
@@ -112,7 +108,7 @@ async def scan_official():
                 except Exception:
                     log.exception("Official page verification failed: %s", item["source_url"])
                     continue
-            await sql(
+            ident = await sql(
                 "INSERT IGNORE INTO releases "
                 "(title,platform,language,release_date,trailer_url,summary,source_url,source_key,status) "
                 "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'pending')",
@@ -122,8 +118,19 @@ async def scan_official():
                 ))
             )
             added += 1
+            # Automatic publication is restricted to newly discovered structured
+            # releases whose official page was independently verified.
+            if AUTO_PUBLISH and VERIFY_OFFICIAL_PAGE and ident:
+                rows = await sql("SELECT * FROM releases WHERE id=%s AND status='pending'", (ident,), True)
+                if rows and not publication_issues(rows[0]):
+                    await sql("UPDATE releases SET status='sending' WHERE id=%s AND status='pending'", (ident,))
+                    try:
+                        await publish_release(rows[0])
+                        log.info("Auto-published verified official release %s", ident)
+                    except Exception:
+                        log.exception("Automatic delivery uncertain for release %s; left sending to avoid duplicates", ident)
         if added:
-            log.info("Imported up to %d official announcements for admin review", added)
+            log.info("Imported up to %d structured official announcements", added)
         return added
 
 async def scan_newsroom():
