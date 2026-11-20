@@ -4,6 +4,7 @@ from urllib.parse import urlsplit
 import aiohttp, aiomysql, feedparser
 from dotenv import load_dotenv
 from pyrogram import Client, filters, idle
+from pyrogram.enums import ParseMode
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 load_dotenv()
@@ -139,7 +140,7 @@ async def approve(_, m):
         if valid_url(r.get(field) or ""):
             buttons.append([InlineKeyboardButton(label,url=r[field])])
     try:
-        msg = await app.send_message(TARGET, render(r), parse_mode="html",
+        msg = await app.send_message(TARGET, render(r), parse_mode=ParseMode.HTML,
                                      reply_markup=InlineKeyboardMarkup(buttons) if buttons else None,
                                      disable_web_page_preview=True)
     except Exception:
@@ -177,4 +178,6 @@ async def main():
         await pool.wait_closed()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    # Pyrogram 2.x expects its client and dispatcher on its own event loop.
+    # Avoid asyncio.run(), which creates a separate event loop.
+    app.run(main())
