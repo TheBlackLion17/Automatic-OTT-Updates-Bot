@@ -1,0 +1,13 @@
+[Unit]
+Description=OTT Updates Telegram Bot
+After=network-online.target mysql.service
+Wants=network-online.target
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/ott-updates-bot
+ExecStart=/root/ott-updates-bot/venv/bin/python /root/ott-updates-bot/bot.py
+Restart=on-failure
+RestartSec=10
+[Install]
+WantedBy=multi-user.target
