@@ -180,3 +180,29 @@ Each title is announced once (case-insensitive) and its status is reserved in th
 The URL uses `https://t.me/agsfilterV3_bot?start=search_<title>`. **The Auto Filter Bot must implement this exact /start payload convention to execute the search automatically**; otherwise Telegram merely opens the bot. Long/non-ASCII titles may require a separate mapping strategy for full-fidelity search.
 
 Deploy: `git pull --ff-only origin main`, `venv/bin/python -m py_compile bot.py upload_announcements.py`, configure `.env`, restart `ott-updates`, then post a new sample file and check logs. Do not upload test files until the Auto Filter Bot deep-link handler is verified.
+
+
+## File Indexing & Sharing Mode
+
+The new file indexing mode is opt-in and uses the existing MySQL database with separate `indexed_media` and `file_bot_users` tables. Existing OTT release records remain untouched.
+
+Set these values in the VPS-only `.env`:
+
+```dotenv
+FILE_INDEX_MODE=true
+FILE_SOURCE_CHANNEL_IDS=-100YOUR_SOURCE_CHANNEL
+FILE_UPDATE_CHAT_ID=-100YOUR_UPDATE_GROUP
+FILE_LOG_CHAT_ID=-100YOUR_LOG_CHANNEL
+FILE_FORCE_CHANNEL_IDS=-100YOUR_REQUIRED_CHANNEL
+FILE_DELETE_SECONDS=300
+```
+
+The bot must be an administrator in the source channel (to receive new posts), able to post in the update group and log channel, and able to check membership in required channels. For private required channels, provide a usable invite link through Telegram channel settings; the current implementation can only display links Telegram exposes to the bot. Users must start the bot before receiving files.
+
+New files (video, document, audio, photo) are indexed once by Telegram file_unique_id. Each new file triggers an update-group post with a deep link. Delivery copies the source message into PM after verifying membership. The bot does not download media onto the VPS. The /files command searches filenames; /filestats is admin-only.
+
+**Limitations:** This first release indexes new channel posts only, not historical channel history. Delivery auto-deletion runs in memory and is not restart-persistent. Uncertain publishing failures are not automatically retried. Group auto-search and an admin bulk-index command are not yet implemented. The original OTT handlers remain in the code, but periodic OTT scanning is suspended in FILE_INDEX_MODE. Do not enable both file indexing and the old upload announcement mode.
+
+### Deploy safely
+
+Back up the VPS `.env` and MySQL database before changing modes. Pull the updated main branch, update the channel IDs in `.env`, compile the Python files and run existing tests. Restart only `ott-updates.service`, then check logs and test with one authorized sample file. Do not commit credentials or session files.
