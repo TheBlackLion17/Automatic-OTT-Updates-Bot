@@ -13,7 +13,8 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 log = logging.getLogger("ott.seasons")
 ENABLED = os.getenv("FILE_INDEX_MODE", "false").lower() == "true"
 SOURCES = {int(v) for v in os.getenv("FILE_SOURCE_CHANNEL_IDS", "").split(",") if v.strip()}
-UPDATE = (os.getenv("FILE_UPDATE_CHAT_USERNAME", "").strip()\n          or int(os.getenv("FILE_UPDATE_CHAT_ID", os.getenv("TARGET_CHAT_ID", "0"))))
+UPDATE = (os.getenv("FILE_UPDATE_CHAT_USERNAME", "").strip()
+          or int(os.getenv("FILE_UPDATE_CHAT_ID", os.getenv("TARGET_CHAT_ID", "0"))))
 FORCE = [int(v) for v in os.getenv("FILE_FORCE_CHANNEL_IDS", "").split(",") if v.strip()]
 DELETE_AFTER = max(0, int(os.getenv("FILE_DELETE_SECONDS", "300")))
 HISTORY_SESSION = os.getenv("FILE_HISTORY_SESSION", "").strip()
