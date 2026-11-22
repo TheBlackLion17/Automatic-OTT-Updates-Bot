@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from pyrogram import Client, filters, idle
 from pyrogram.enums import ParseMode
 from upload_announcements import register as register_upload_announcements, initialize as initialize_upload_announcements
+from file_indexer import register as register_file_indexer, initialize as initialize_file_indexer, ENABLED as FILE_INDEX_MODE
 from official_discovery import discover
 from official_newsroom import discover_jiostar
 from official_article_dates import verify_jiostar_article
@@ -256,7 +257,7 @@ async def destination_diagnostics():
 
 async def loop():
     while True:
-        if DATABASE_UPLOAD_MODE:
+        if DATABASE_UPLOAD_MODE or FILE_INDEX_MODE:
             await asyncio.sleep(INTERVAL * 60)
             continue
         try:
@@ -440,7 +441,9 @@ async def reject(_, m):
     await sql("UPDATE releases SET status='rejected' WHERE id=%s AND status='pending'", (ident,))
     await m.reply_text("Rejected if pending.")
 
-register_upload_announcements(app, sql)
+if not FILE_INDEX_MODE:
+    register_upload_announcements(app, sql)
+register_file_indexer(app, sql, ADMINS)
 
 async def main():
     global pool
@@ -448,8 +451,10 @@ async def main():
         port=int(os.getenv("MYSQL_PORT","3306")),user=os.environ["MYSQL_USER"],
         password=os.environ["MYSQL_PASSWORD"],db=os.getenv("MYSQL_DATABASE","ott_updates"),
         autocommit=True)
-    if DATABASE_UPLOAD_MODE:
+    if DATABASE_UPLOAD_MODE and not FILE_INDEX_MODE:
         await initialize_upload_announcements(sql)
+    if FILE_INDEX_MODE:
+        await initialize_file_indexer(sql)
     await app.start()
     log.info("Target diagnostics: %s", await destination_diagnostics())
     task = asyncio.create_task(loop())
