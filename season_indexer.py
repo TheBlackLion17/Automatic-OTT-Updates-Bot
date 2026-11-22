@@ -358,7 +358,7 @@ def register(app,sql,admins):
                 await choose_movie_language(sql,message,int(movie.group(1)))
                 message.stop_propagation()
 
-    @app.on_callback_query(filters.regex(r"^(sl|ml|mq):\\d+:\\d+(?::\\d+)?$"))
+    @app.on_callback_query(filters.regex(r"^(sl|ml|mq):\d+:\d+(?::\d+)?$"))
     async def language_callback(_,query):
         await query.answer()
         if not query.message or not query.from_user or query.message.chat.type.value != "private":
