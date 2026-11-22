@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from pyrogram import Client, filters, idle
 from pyrogram.enums import ParseMode
 from upload_announcements import register as register_upload_announcements, initialize as initialize_upload_announcements
-from file_indexer import register as register_file_indexer, initialize as initialize_file_indexer, ENABLED as FILE_INDEX_MODE
+from season_indexer import register as register_file_indexer, initialize as initialize_file_indexer, deletion_worker, ENABLED as FILE_INDEX_MODE
 from official_discovery import discover
 from official_newsroom import discover_jiostar
 from official_article_dates import verify_jiostar_article
@@ -458,11 +458,14 @@ async def main():
     await app.start()
     log.info("Target diagnostics: %s", await destination_diagnostics())
     task = asyncio.create_task(loop())
+    cleanup_task = asyncio.create_task(deletion_worker(app, sql)) if FILE_INDEX_MODE else None
     try:
         await idle()
     finally:
         task.cancel()
-        await asyncio.gather(task,return_exceptions=True)
+        if cleanup_task:
+            cleanup_task.cancel()
+        await asyncio.gather(*([task, cleanup_task] if cleanup_task else [task]),return_exceptions=True)
         await app.stop()
         pool.close()
         await pool.wait_closed()
